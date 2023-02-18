@@ -1,0 +1,44 @@
+name: build
+
+on:
+  push:
+    paths:
+      - "packages/nice/**"
+      - "packages/nice_annotation/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "packages/nice/**"
+      - "packages/nice_annotation/**"
+      - ".github/workflows/**"
+
+jobs:
+  nice:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        package:
+          - packages/nice
+          - packages/nice_annotation
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: subosito/flutter-action@v2
+
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: ${{ matrix.package }}
+
+      - name: Check format
+        run: dart format --set-exit-if-changed .
+        working-directory: ${{ matrix.package }}
+
+      - name: Analyze
+        run: flutter analyze
+        working-directory: ${{ matrix.package }}
+
+      - name: Run tests
+        run: flutter test
+        working-directory: ${{ matrix.package }}
