@@ -1,0 +1,14 @@
+name: nice
+
+packages:
+  - packages/nice
+  - packages/nice_annotation
+
+command:
+  bootstrap:
+    usePubspecOverrides: true
+    # https://github.com/dart-lang/pub/issues/3404)
+    runPubGetInParallel: false
+
+ide:
+  intellij: false

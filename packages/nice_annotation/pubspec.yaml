@@ -1,0 +1,13 @@
+name: nice_annotation
+description: >
+  Annotations for the nice code-generator.
+  This package does nothing without nice.
+version: 0.0.1
+repository: https://github.com/jtdLab/nice
+issue_tracker: https://github.com/jtdLab/nice/issues
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dev_dependencies:
+  test: ^1.21.0

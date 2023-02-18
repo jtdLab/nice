@@ -1,0 +1,7 @@
+builders:
+  nice:
+    import: "package:nice/builder.dart"
+    builder_factories: ["nice"]
+    build_extensions: { ".dart": [".nice.dart"] }
+    auto_apply: dependents
+    build_to: source
