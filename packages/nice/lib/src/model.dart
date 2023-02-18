@@ -1,5 +1,7 @@
 import 'package:analyzer/dart/element/element.dart';
 
+// TODO remove this file and map anylzer elements directly to templates
+
 class MockElement {
   final String name;
   final List<FieldElement> fields;

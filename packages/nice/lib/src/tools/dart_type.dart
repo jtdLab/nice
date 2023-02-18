@@ -1,6 +1,6 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
-import 'package:nice/src/templates/when_template.dart';
+import 'package:nice/src/templates/when.dart';
 
 extension DartTypeX on DartType {
   bool get isPrimitve {

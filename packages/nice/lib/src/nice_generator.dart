@@ -4,11 +4,11 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:build/src/builder/build_step.dart';
 import 'package:logging/logging.dart';
 import 'package:nice/src/model.dart';
-import 'package:nice/src/templates/final_mock_prop_template.dart';
-import 'package:nice/src/templates/mock_template.dart';
-import 'package:nice/src/templates/register_fallback_values_template.dart';
-import 'package:nice/src/templates/when_template.dart';
-import 'package:nice/src/tools/type.dart';
+import 'package:nice/src/templates/mock_class.dart';
+import 'package:nice/src/templates/register_fallback_values.dart';
+import 'package:nice/src/templates/temp_mock_declaration.dart';
+import 'package:nice/src/templates/when.dart';
+import 'package:nice/src/tools/dart_type.dart';
 import 'package:nice_annotation/nice_annotation.dart';
 import 'package:source_gen/source_gen.dart';
 
@@ -27,6 +27,16 @@ class NiceGenerator extends GeneratorForAnnotation<Nice> {
     }
     final library = await buildStep.resolver.libraryFor(assetId);
 
+    if (library.hasAliasedImports()) {
+      throw InvalidGenerationSourceError(
+        '''
+Some of your libraries contain aliased imports.
+
+Nice might support this in the future.
+''',
+      );
+    }
+
     final buffer = StringBuffer();
 
     final mocks = <MockElement>[];
@@ -40,149 +50,242 @@ class NiceGenerator extends GeneratorForAnnotation<Nice> {
         );
       }
 
-      final maybeMock = _maybeMockOf(element);
-      if (maybeMock != null) {
-        mocks.add(maybeMock);
+      if (element.isValidMock) {
+        mocks.add(element.asMock());
+      } else if (element.isValidFake) {
+        fakes.add(element.asFake());
       } else {
-        final maybeFake = _maybeFakeOf(element);
-        if (maybeFake != null) {
-          fakes.add(maybeFake);
-        }
+        throw InvalidGenerationSourceError(
+          '@nice can only be applied on classes defined in the following way:\n'
+          '\n'
+          'Mock:\n'
+          'class MockMyClass extends _\$MockMyClass implements MyClass {}\n'
+          '\n'
+          'Fake:\n'
+          'class FakeMyClass extends Fake implements MyClass {}\n'
+          '\n'
+          'Failing element: ${element.name}\n',
+          element: element,
+        );
       }
     }
 
-    final requiredFallbackValues = <String>{};
+    final requiredFallbackValues = mocks.requiredFallbackValues();
+    final availableFallbackValues = <FallbackValue>{
+      ...requiredFallbackValues.whereType<EnumFallbackValue>(),
+      ...requiredFallbackValues
+          .whereType<ClassFallbackValue>()
+          .where((e) => fakes.any((fake) => fake.name == e.name))
+    };
+    final missingFallbackValues = {
+      ...requiredFallbackValues,
+    }..removeAll(availableFallbackValues);
 
-    for (final mock in mocks) {
-      final finalMockProps = [
-        ...mock.fields
-            .map((e) => e.type)
-            .where((e) => !e.isPrimitve)
-            .map((e) => FinalMockPropTemplate(name: e.element!.name!)),
-        ...mock.methods
-            .map((e) => e.returnType)
-            .where((e) => !e.isPrimitve)
-            .map((e) => FinalMockPropTemplate(name: e.element!.name!)),
-      ];
-      final whens = [
-        ...mock.fields.map(
-          (e) => WhenTemplate(
-            name: e.name,
-            type: Type.property,
-            returnType: e.type.getReturnType(),
-            value: e.type.getDefaultValue(),
-          ),
-        ),
-        ...mock.methods.map(
-          (e) => WhenTemplate(
-            name: e.name,
-            type: Type.function,
-            arguments: [
-              ...e.parameters.where((param) => !param.isNamed).map(
-                    (e) => Argument(),
-                  ),
-              ...e.parameters.where((param) => param.isNamed).map(
-                    (e) => NamedArgument(name: e.name),
-                  ),
-            ],
-            returnType: e.returnType.getReturnType(),
-            value: e.returnType.getDefaultValue(),
-          ),
-        ),
-      ];
+    if (missingFallbackValues.isNotEmpty) {
+      logger.warning('''
+Missing fake(s) for the following classes:
 
-      final mockTemplate = MockTemplate(
-        name: mock.name,
-        finalMockProps: finalMockProps,
-        whens: whens,
-      );
-      buffer.writeln(mockTemplate.toString());
+${missingFallbackValues.join('\n')}
 
-      requiredFallbackValues.addAll(
-        mock.methods
-            .map(
-              (e) => e.parameters
-                  .where((param) => param.isNamed)
-                  .map((e) => e.type.element!.name!)
-                  .toList(),
-            )
-            .toList()
-            .fold<List<String>>([], (prev, e) => prev + e),
-      );
-    }
-
-    final availableFallbackValues = <String>{};
-    final fakeNames = fakes.map((e) => e.name);
-    for (final fallbackValue in requiredFallbackValues) {
-      if (fakeNames.contains(fallbackValue)) {
-        availableFallbackValues.add('Fake$fallbackValue');
-      } else {
-        logger.warning('''
-Fake for $fallbackValue not found. Require the following code:
+Declare fakes and annotate them with @nice like this:
 
 @nice
-class Fake$fallbackValue extends Fake implements $fallbackValue {}
+class FakeFoo extends Fake implements Foo {}
 ''');
-      }
     }
 
-    final registerFallbackValuesTemplate = RegisterFallbackValuesTemplate(
-      values: availableFallbackValues,
+    buffer.write(
+      RegisterFallbackValues(
+        fallbackValues: availableFallbackValues,
+      ).toString(),
     );
-    buffer.write(registerFallbackValuesTemplate.toString());
+
+    for (final mock in mocks) {
+      buffer.writeln(mock.asMockClass().toString());
+    }
 
     return buffer.toString();
   }
 
-  MockElement? _maybeMockOf(ClassElement element) {
-    try {
-      if (element.supertype?.element.name == 'Fake') {
-        return null;
-      }
-
-      final interfaceElement = element.interfaces.first.element;
-      final name = interfaceElement.name;
-      final fields = interfaceElement.fields.where((e) => e.isPublic).toList();
-      final methods =
-          interfaceElement.methods.where((e) => e.isPublic).toList();
-
-      return MockElement(
-        name: name,
-        fields: fields,
-        methods: methods,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  FakeElement? _maybeFakeOf(ClassElement element) {
-    try {
-      if (element.supertype?.element.name != 'Fake') {
-        return null;
-      }
-
-      final interfaceElement = element.interfaces.first.element;
-      final name = interfaceElement.name;
-      final fields = interfaceElement.fields.where((e) => e.isPublic).toList();
-      final methods =
-          interfaceElement.methods.where((e) => e.isPublic).toList();
-
-      return FakeElement(
-        name: name,
-        fields: fields,
-        methods: methods,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
   @override
-  Future<String> generateForAnnotatedElement(
+  Stream<String> generateForAnnotatedElement(
     Element element,
     ConstantReader annotation,
     BuildStep buildStep,
-  ) =>
-      throw UnimplementedError();
+  ) async* {
+    // implemented for source_gen_test – otherwise unused
+    if (element is! ClassElement) {
+      throw InvalidGenerationSourceError(
+        '@nice can only be applied on classes. Failing element: ${element.name}',
+        element: element,
+      );
+    }
+
+    // TODO impl
+
+    /* 
+    final globalData = parseGlobalData(element.library!);
+    final data = parseElement(buildStep, globalData, element);
+
+    if (data == null) return;
+
+    for (final value in generateForData(globalData, await data)) {
+      yield value.toString();
+    } */
+  }
+}
+
+extension on LibraryElement {
+  bool hasAliasedImports() => prefixes.isNotEmpty;
+}
+
+// TODO check that names match from interface and mock names
+extension on ClassElement {
+  bool get isValidMock {
+    if (isAbstract || isPrivate) {
+      return false;
+    }
+
+    final superClass = this.supertype;
+    if (superClass == null) {
+      return false;
+    }
+
+    // TODO this check works but is not ideal
+    final superClassName = superClass.element.name;
+    if (superClassName == 'Fake') {
+      return false;
+    }
+
+    final interfaces = this.interfaces;
+    if (interfaces.length != 1) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool get isValidFake {
+    if (isAbstract || isPrivate) {
+      return false;
+    }
+
+    final superClass = this.supertype;
+    if (superClass == null) {
+      return false;
+    }
+
+    final superClassName = superClass.element.name;
+    if (superClassName != 'Fake') {
+      return false;
+    }
+
+    final interfaces = this.interfaces;
+    if (interfaces.length != 1) {
+      return false;
+    }
+
+    return true;
+  }
+
+  MockElement asMock() {
+    final interface = interfaces.first.element;
+    final name = interface.name;
+    final fields = interface.fields.where((e) => e.isPublic).toList();
+    final methods = interface.methods.where((e) => e.isPublic).toList();
+
+    return MockElement(
+      name: name,
+      fields: fields,
+      methods: methods,
+    );
+  }
+
+  FakeElement asFake() {
+    final interface = interfaces.first.element;
+    final name = interface.name;
+    final fields = interface.fields.where((e) => e.isPublic).toList();
+    final methods = interface.methods.where((e) => e.isPublic).toList();
+
+    return FakeElement(
+      name: name,
+      fields: fields,
+      methods: methods,
+    );
+  }
+}
+
+extension on MockElement {
+  MockClass asMockClass() {
+    final finalMockProps = [
+      ...fields
+          .map((e) => e.type)
+          .where((e) => !e.isPrimitve)
+          .map((e) => TempMockDeclaration(name: e.element!.name!)),
+      ...methods
+          .map((e) => e.returnType)
+          .where((e) => !e.isPrimitve)
+          .map((e) => TempMockDeclaration(name: e.element!.name!)),
+    ];
+    final whens = [
+      ...fields.map(
+        (e) => FieldWhen(
+          name: e.name,
+          returnType: e.type.getReturnType(),
+          value: e.type.getDefaultValue(),
+        ),
+      ),
+      ...methods.map(
+        (e) => MethodWhen(
+          name: e.name,
+          arguments: [
+            ...e.parameters.where((param) => !param.isNamed).map(
+                  (e) => UnnamedArgument(),
+                ),
+            ...e.parameters.where((param) => param.isNamed).map(
+                  (e) => NamedArgument(name: e.name),
+                ),
+          ],
+          returnType: e.returnType.getReturnType(),
+          value: e.returnType.getDefaultValue(),
+        ),
+      ),
+    ];
+
+    return MockClass(
+      name: name,
+      tempMockDeclarations: finalMockProps,
+      whens: whens,
+    );
+  }
+}
+
+extension on List<MockElement> {
+  Set<FallbackValue> requiredFallbackValues() => map(
+        (e) => e.methods
+            .map(
+              (e) => e.parameters.where(
+                (e) {
+                  return !e.type.isPrimitve || e.type.element is EnumElement;
+                },
+              ).map(
+                (e) {
+                  final element = e.type.element;
+
+                  if (element is EnumElement) {
+                    return EnumFallbackValue(
+                      name: element.name,
+                      valueName: element.fields.first.name,
+                    );
+                  } else {
+                    return ClassFallbackValue(
+                      name: element!.name!,
+                    );
+                  }
+                },
+              ).toList(),
+            )
+            .toList()
+            .fold<List<FallbackValue>>([], (prev, e) => prev + e),
+      ).fold<List<FallbackValue>>([], (prev, e) => prev + e).toSet();
 }
