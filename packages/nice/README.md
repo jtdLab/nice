@@ -88,7 +88,7 @@ Note: It is also possible to generate [nice] mocks using multiple files. Every f
 
 Generate [nice] mocks that are ready to use in a single line.
 
-Note: When using a [nice] mock its only required to stub methods/fields whose return value is necessary in the verification/assert part of the test. This leads to increased readability and expressiveness of the test.
+Note: When using a [nice] mock its only required to stub methods/fields whose return value impacts the verification/assert part of the test. This leads to increased readability and expressiveness of the test.
 
 Before:
 
