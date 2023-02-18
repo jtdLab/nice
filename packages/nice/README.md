@@ -1,5 +1,7 @@
 # Nice 👌
 
+Nice mocking setup for [mocktail]. Ready to use mocks with a single line of code.
+
 # Motivation
 
 [mocktail] is a great package to easily define mocks and verify behaviour, but in some situations there comes some inconvenience:
