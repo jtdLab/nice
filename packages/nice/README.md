@@ -1,3 +1,5 @@
+# Nice 👌
+
 # Motivation
 
 [mocktail] is a great package to easily define mocks and verify behaviour, but in some situations there comes some inconvenience:
