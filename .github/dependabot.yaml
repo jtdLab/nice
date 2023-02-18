@@ -1,0 +1,23 @@
+version: 2
+enable-beta-ecosystems: true
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    reviewers:
+      - "jtdLab"
+
+  - package-ecosystem: "pub"
+    directory: "/packages/nice"
+    schedule:
+      interval: "daily"
+    reviewers:
+      - "jtdLab"
+
+  - package-ecosystem: "pub"
+    directory: "/packages/nice_annotations"
+    schedule:
+      interval: "daily"
+    reviewers:
+      - "jtdLab"
